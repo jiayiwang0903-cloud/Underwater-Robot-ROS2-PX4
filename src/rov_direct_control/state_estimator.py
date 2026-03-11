@@ -104,35 +104,49 @@ class GazeboEstimator(StateEstimator):
 # ────────────────────────────────────────────────────
 
 class EKFEstimator(StateEstimator):
-    """TODO: 实机 EKF 融合 DVL + 深度计 + IMU + USBL。
-    
-    状态向量: [x, y, z, vx, vy, vz, roll, pitch, yaw]
-    预测步: IMU 加速度/角速度积分
-    更新步:
-      - 深度计 → z
-      - DVL    → vx, vy, vz (机体)
-      - USBL   → x, y (世界，低频)
+    """实机/仿真均可使用的 EKF 估计器。
+    我们依靠 robot_localization 包的 ekf_node 在后台处理矩阵运算。
+    这个类只负责订阅融合后输出的 /odometry/filtered，喂给控制器。
     """
 
-    def __init__(self):
+    def __init__(self, node):
+        from nav_msgs.msg import Odometry
+        
+        self.node = node
         self._state = RovState()
-        # TODO: 初始化 EKF 矩阵 (F, H, Q, R, P, x)
+        
+        # 订阅 EKF 融合后的话题
+        self.sub = self.node.create_subscription(
+            Odometry, 
+            '/odometry/filtered', 
+            self._odom_cb, 
+            10)
+            
+    def _odom_cb(self, msg):
+        # 位置
+        self._state.x = msg.pose.pose.position.x
+        self._state.y = msg.pose.pose.position.y
+        self._state.z = msg.pose.pose.position.z
+        
+        # 姿态
+        q = msg.pose.pose.orientation
+        
+        # 四元数转欧拉角
+        w, x, y, z = q.w, q.x, q.y, q.z
+        roll = math.atan2(2.0 * (w * x + y * z), 1.0 - 2.0 * (x * x + y * y))
+        pitch = math.asin(max(-1.0, min(1.0, 2.0 * (w * y - z * x))))
+        yaw = math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
+        
+        self._state.roll = roll
+        self._state.pitch = pitch
+        self._state.yaw = yaw
+        
+        # 速度
+        self._state.vx = msg.twist.twist.linear.x
+        self._state.vy = msg.twist.twist.linear.y
+        self._state.vz = msg.twist.twist.linear.z
+        
+        self._state.ready = True
 
     def get_state(self) -> RovState:
         return self._state
-
-    def predict(self, ax, ay, az, gx, gy, gz, dt):
-        """IMU 预测步。"""
-        pass  # TODO
-
-    def update_depth(self, depth):
-        """深度计更新步。"""
-        pass  # TODO
-
-    def update_dvl(self, vx, vy, vz):
-        """DVL 更新步。"""
-        pass  # TODO
-
-    def update_usbl(self, x, y):
-        """USBL 更新步。"""
-        pass  # TODO

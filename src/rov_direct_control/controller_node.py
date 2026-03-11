@@ -10,7 +10,7 @@ from pid import PIDController
 from allocator import allocate
 from gz_thruster import GzThrusterInterface
 from px4_interface import PX4Interface
-from state_estimator import GazeboEstimator
+from state_estimator import GazeboEstimator, EKFEstimator
 
 
 class USTROVDirectController(Node):
@@ -18,8 +18,8 @@ class USTROVDirectController(Node):
         super().__init__('ustrov_direct_controller')
 
         # 目标位姿 (NED: X前 Y右 Z下)
-        self.target_x = 10.0
-        self.target_y = 10.0
+        self.target_x = 0.0
+        self.target_y = 0.0
         self.target_depth = 5.0
         self.target_yaw = 0.0
         self.dt = 0.02
@@ -30,9 +30,9 @@ class USTROVDirectController(Node):
         self.pid_z = PIDController(kp=20.0, ki=5.0, kd=20.0, limit=200.0)
         self.pid_yaw = PIDController(kp=5.0, ki=0.5, kd=2.0, limit=50.0)
 
-        # 状态估计（仿真模式：Gazebo 地面真值）
-        self.estimator = GazeboEstimator(model_name='ustrov_0', world_name='default')
-
+        # 状态估计
+        # self.estimator = GazeboEstimator(model_name='ustrov_0', world_name='default')
+        self.estimator = EKFEstimator(self)
         # 硬件接口
         self.thrusters = GzThrusterInterface(model_name='ustrov_0')
         self.px4 = PX4Interface(self)
