@@ -67,17 +67,21 @@ class USTROVDirectController(Node):
     def _control_loop(self):
         self.tick += 1
         
-        # PX4 后端需要维持 Offboard 心跳
+        # 1. 无条件：维持 Offboard 心跳
         if self.px4 is not None:
             self.px4.send_offboard_mode()
 
-        if self.px4 is not None and self.tick >= 50 and not self.offboard_armed:
-            self.px4.arm()
-            self.offboard_armed = True
-
+        # 2. 读取状态
         state = self.estimator.get_state()
+
+        # 3. 如果状态没准备好（或者还没开始正式控制），必须发送一组默认推力维持 PX4 的 setpoint 检查！
         if not state.ready:
+            if self.px4 is not None:
+                # 喂狗：发全 0 的推力或全 NaN 给 PX4，满足 Offboard 需要 setpoint 的要求
+                self.thrusters.send(np.zeros(8)) 
             return
+
+        # ============ 下面的逻辑在 state.ready == True 后才会执行 ============
 
         if not self.control_started:
             self.control_started = True
@@ -95,11 +99,21 @@ class USTROVDirectController(Node):
                 self.target_yaw = state.yaw + self.target_yaw
                 self._targets_initialized = True
             elif not self._targets_initialized:
-                self._targets_initialized = True
+                self._targets_initialized = True      
 
             self.get_logger().info(
                 f'状态估计就绪: x={state.x:.2f} y={state.y:.2f} z={state.z:.2f}m，控制启动！模式={self.target_mode}, 目标Z={self.target_depth:.2f}')                                                                  
         
+        # 4. 状态机：无阻塞的解锁流程
+        if self.px4 is not None and not self.offboard_armed:
+            if self.tick == 50:
+                self.px4.set_offboard_mode()
+                self.get_logger().info("请求切换至 Offboard 模式...")
+            elif self.tick == 55:  # 利用 5 个 tick (5 * 20ms = 100ms) 替代之前的 sleep(0.1)
+                self.px4.arm()
+                self.offboard_armed = True
+                self.get_logger().info("请求解锁！")
+
         # NED 世界坐标系下的位置误差
         err_x_world = self.target_x - state.x
         err_y_world = self.target_y - state.y

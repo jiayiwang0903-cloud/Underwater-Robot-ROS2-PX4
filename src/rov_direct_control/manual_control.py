@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
-电机空转测试脚本 (Hardware-in-the-Loop)
-!!! 运行前切记：拆除真实机器人上的所有螺旋桨 !!!
-
-允许你输入 0-7 的电机编号和推力比例 (-1.0 到 1.0) 进行单电机测试。
-必须在有 DDS 连接到 Pixhawk 的情况下运行。
+Manual Control Node for ROV Direct Control
+提供一个基于命令行和手柄输入的手动控制接口
 """
 
 import sys
@@ -22,9 +19,9 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Joy
 from allocator import allocate
 
-class MotorTestNode(Node):
+class ManualControlNode(Node):
     def __init__(self):
-        super().__init__('motor_test_node')
+        super().__init__('manual_control_node')
         
         self.px4_cmd = PX4Interface(self)
         self.px4_act = PX4ActuatorInterface(self)
@@ -35,28 +32,23 @@ class MotorTestNode(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
-        
-        # 订阅飞行器状态以实时监控解锁状态
+
         self.sub_status = self.create_subscription(
-            VehicleStatus, '/fmu/out/vehicle_status_v1', self._status_cb, qos_profile
-        )
-        self.is_armed = False
-        self.nav_state = 0
+            VehicleStatus, '/fmu/out/vehicle_status_v1', self._status_cb, qos_profile 
+        ) #订阅飞行器状态以实时监控解锁状态
+        self.is_armed = False # Arm状态
+        self.nav_state = 0 # 导航状态
 
-        # ROS 2 标准手柄消息订阅
-        self.sub_joy = self.create_subscription(Joy, '/joy', self._joy_cb, qos_profile)
+        self.sub_joy = self.create_subscription(Joy, '/joy', self._joy_cb, qos_profile) #手柄
 
-        # 为了测试，我们将推力标定改为归一化直传。
-        # 覆写 px4_act.max_thrust_newtons，使其在调用 send 时，传入的即是 -1.0 到 1.0 的控制量
+        # 覆写 px4_act.max_thrust_newtons，使其在调用 send 时，传入的即是 -1.0 到 1.0 的控制量（增大即可保护）
         self.px4_act.max_thrust_newtons = 1.0  
         
-        # 使用 NaN 初始化，告诉飞控"我不控制这些电机"，以便让它输出默认的 Disarmed PWM 值
-        self.active_thrusts = np.full(8, np.nan, dtype=float)
+        self.active_thrusts = np.full(8, np.nan, dtype=float) #初始化
+        self.arm_sequence_tick = -1     #tick追踪
         
-        # 50Hz 维持 PX4 Offboard 心跳和 Actuator 消息
-        self.create_timer(0.02, self._timer_callback)
-        
-        self.get_logger().info("电机测试节点已启动，等待控制台输入指令...")
+        self.create_timer(0.02, self._timer_callback) # 50Hz 维持 PX4 Offboard 心跳和 Actuator 消息
+        self.get_logger().info("Manual Control Node 已启动")
 
     def _status_cb(self, msg):
         self.is_armed = (msg.arming_state == 2) # ARMING_STATE_ARMED
@@ -87,13 +79,19 @@ class MotorTestNode(Node):
         lt_val = deadband(lt_val, 0.05)
         rt_val = deadband(rt_val, 0.05)
         
+
+        # 放大系数来源于 allocator.py 中的安装矩阵 B_ALLOC：
+        MAX_F_XY = 2.8284   # 4个水平电机45度推力的最大合力 (4 * sin(45°))
+        MAX_F_Z  = 4.0      # 4个垂直电机上下推力的最大合力
+        MAX_M_Z  = 0.1414   # 4个水平电机偏航的最大力矩 (4 * sin(45°) * 0.05m力臂)
+
         # tau 包含 [Fx, Fy, Fz, Mx, My, Mz]
         tau = np.zeros(6, dtype=np.float64)
-        tau[0] = ls_y             # 前后
-        tau[1] = ls_x             # 左右
-        tau[2] = lt_val - rt_val  # Z轴 (FRD中，+Z为向下)
-        tau[5] = rs_x             # Yaw绕Z旋转
-        
+        tau[0] = ls_y * MAX_F_XY             # x 前后
+        tau[1] = ls_x * MAX_F_XY             # y 左右
+        tau[2] = (lt_val - rt_val) * MAX_F_Z # z 深度 (FRD中，+Z为向下)
+        tau[5] = rs_x * MAX_M_Z              # Yaw 绕Z旋转
+
         # 只有在有输入时，才覆盖当前推力值，避免影响手敲指令
         if not np.allclose(tau, 0.0, atol=0.01):
             # 将推力截取限制在 [-1.0, 1.0]
@@ -102,33 +100,46 @@ class MotorTestNode(Node):
             self._joy_controlled = True
         else:
             # 当手柄摇杆归中时，如果是从手柄控制转来的，将推力归为0
-            # 这样就不会覆盖用户通过键盘独立设置的推力
             if getattr(self, '_joy_controlled', False):
                 self.active_thrusts.fill(np.nan)
                 self._joy_controlled = False
+
 
         # 手柄按键快捷操作：
         # msg.buttons[7] (Start键) -> 解锁
         # msg.buttons[6] (Back键) -> 上锁
         if len(msg.buttons) >= 8:
             if msg.buttons[7] == 1 and not self.is_armed:
-                self.px4_cmd.arm()
-                self.get_logger().info('手柄: 已发送解锁指令')
-            elif msg.buttons[6] == 1 and self.is_armed:
+                self.arm_sequence_tick = 0  # [修改] 触发解锁状态机
+                self.get_logger().info('手柄: 已请求解锁')
+            elif msg.buttons[6] == 1 :
+            #and self.is_armed:
                 self.px4_cmd._send_command(400, 0.0, 21196.0)
                 self.active_thrusts.fill(np.nan)
                 self.get_logger().info('手柄: 已发送上锁指令')
 
     def _timer_callback(self):
-        # 1. 告诉飞控我们绕过内置混控器
-        self.px4_cmd.send_offboard_mode()
-        # 2. 发送实际推力指令
-        self.px4_act.send(self.active_thrusts)
+        self.px4_cmd.send_offboard_mode() #维持 Offboard 心跳
+        self.px4_act.send(self.active_thrusts) #发送当前推力指令
+
+        #解锁状态机
+        if self.arm_sequence_tick >= 0:
+            if self.arm_sequence_tick == 0:
+                # 第一步：请求切入 Offboard 模式
+                self.px4_cmd.set_offboard_mode() 
+            elif self.arm_sequence_tick == 5: 
+                # 第二步：延时 100ms (5个tick) 后，发送实际的解锁指令
+                self.px4_cmd.arm()
+                self.arm_sequence_tick = -1  # 结束序列
+            
+            # 序列推进
+            if self.arm_sequence_tick != -1:
+                self.arm_sequence_tick += 1
 
 
-def print_status_dashboard(node: MotorTestNode):
-    """打印简洁美观的电机状态进度条"""
-    arm_str = "已解锁 (ARMED)" if node.is_armed else "未解锁 (DISARMED)"
+def print_status_dashboard(node: ManualControlNode):
+    """Print a simple dashboard showing current arm status and thrust values for all motors."""
+    arm_str = "ARMED" if node.is_armed else "DISARMED"
     print(f"\n[{arm_str}] 导航模式: {node.nav_state}")
     print("--- 实时推力指令 ---")
     for i in range(8):
@@ -148,15 +159,9 @@ def print_status_dashboard(node: MotorTestNode):
             print(f"[{i}] 电机:  [{bar_str}] {val*100:>5.1f}%")
     print("--------------------\n")
 
-def console_input_thread(node: MotorTestNode):
-    print("====================================")
-    print("  !!! 危险：请确认浆叶已拆除 !!!    ")
-    print("====================================")
+def console_input_thread(node: ManualControlNode):
     print("命令格式: [电机编号 0-7] [推力 -1.0 ~ 1.0]")
-    print("        如 '0 0.5' 表示0号电机50%正向推力")
-    print("        如 '2 nan' 表示2号电机休眠(切断)")
     print("        如 'z 0.3' 表示同时控制 4,5,6,7 垂直电机(上浮/下潜)")
-    print("               ")
     print("输入 arm 解锁，输入 disarm 上锁")
     print("支持手柄(需运行 ros2 run joy joy_node): Start 键解锁, Back 键上锁")
     print("手柄控制：左摇杆前后左右平移，右摇杆转向，LT下潜，RT上浮")
@@ -192,10 +197,10 @@ def console_input_thread(node: MotorTestNode):
             continue
 
         if cmd == 'arm':
-            node.px4_cmd.arm()
-            print(">>> 试图发送解锁指令！")
+            node.arm_sequence_tick = 0  # [修改] 触发解锁状态机
+            print(">>> 试图执行安全解锁序列！请等待...")
             continue
-            
+
         if cmd == 'disarm':
             node.px4_cmd._send_command(400, 0.0, 21196.0) 
             node.active_thrusts.fill(np.nan)
@@ -205,7 +210,7 @@ def console_input_thread(node: MotorTestNode):
         parts = cmd.split()
         if len(parts) != 2:
             print("格式错误。请输入: [编号] [推力值] 或者 'z [推力值]'")
-            continue
+            continueMotorTestNode
             
         # 处理垂直电机批处理命令 'z'
         if parts[0] == 'z':
@@ -250,7 +255,7 @@ def console_input_thread(node: MotorTestNode):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MotorTestNode()
+    node = ManualControlNode()
     
     # 启动控制台输入线程
     input_thread = threading.Thread(target=console_input_thread, args=(node,))

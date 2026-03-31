@@ -42,11 +42,11 @@ ekf_filter_node:
     imu0_differential: false
     imu0_remove_gravitational_acceleration: true
 
-    # # 4. 视觉感知配置 (视觉 EKF: 绝对位置 X, Y 与 Yaw 校准)
-    # pose1: /sensor/aruco_pose
-    # pose1_config: [true,  true,  false,  # 融合计算出的绝对 X, Y
-    #                false, false, true,   # 融合航向角 Yaw (修正陀螺仪漂移)
-    #                false, false, false,
-    #                false, false, false,
-    #                false, false, false]
-    # pose1_differential: false
+    # 4. 视觉感知配置 (视觉 EKF: 绝对位置 X, Y 与 Yaw 校准)
+    pose1: /sensor/aruco_pose
+    pose1_config: [true,  true,  false,  # 融合计算出的绝对 X, Y
+                   false, false, true,   # 融合航向角 Yaw (修正陀螺仪漂移)
+                   false, false, false,
+                   false, false, false,
+                   false, false, false]
+    pose1_differential: false

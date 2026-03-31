@@ -4,13 +4,6 @@ USTROV direct-control stack based on ROS 2 + PX4.
 
 USTROV 基于 ROS 2 + PX4 的直接控制代码栈。
 
-## 0. Rename Note / 重命名说明
-
-- Simulation folder is now **`sim/`**.
-- Previous name **`sim_env/`** is deprecated and should not be used.
-
-- 仿真目录已统一为 **`sim/`**。
-- 之前的 **`sim_env/`** 已废弃，不再作为有效路径使用。
 
 ## 1. Architecture Overview / 架构总览
 
@@ -81,7 +74,8 @@ All simulation components are under `sim/`.
   Offboard 心跳与解锁/上锁指令接口。
 
 - `px4_actuator.py`
-  Converts thrust array to PX4 `ActuatorMotors` message and publishes to FMU input.
+  Converts thrust array to PX4 `Actu            'DVL bridge started / 启动成功: '
+atorMotors` message and publishes to FMU input.
   将推力数组转换为 PX4 `ActuatorMotors` 消息并发布到 FMU 输入。
 
 - `test_motors.py`
@@ -119,6 +113,7 @@ All simulation components are under `sim/`.
 - `sim/gz_thruster.py`
   Gazebo transport-based direct thruster command helper.
   基于 Gazebo transport 的推力直连接口。
+            'DVL bridge started / 启动成功: '
 
 ## 3. Real Controller Details / 实机控制细节
 
@@ -182,6 +177,8 @@ Requirements / 前置条件：
 - PX4 SITL or hardware PX4 running.
 - EKF pipeline alive (`/odometry/filtered` available).
 
+
+
 - Micro XRCE Agent 已运行。
 - PX4 SITL 或实机 PX4 已运行。
 - EKF 融合链路可用（`/odometry/filtered` 有数据）。
@@ -233,6 +230,7 @@ lsof -iUDP:8888
 ```
 
 Stop duplicate agent process; keep only one on UDP `8888`.
+
 
 停止重复 Agent 进程，确保 UDP `8888` 仅有一个实例。
 
