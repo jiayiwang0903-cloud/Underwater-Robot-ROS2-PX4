@@ -1,5 +1,6 @@
 ekf_filter_node:
   ros__parameters:
+    # 仿真配置: 默认配合 sim_sensors.py 使用
     frequency: 30.0
     sensor_timeout: 0.1
     two_d_mode: false
@@ -10,7 +11,7 @@ ekf_filter_node:
     base_link_frame: base_link
     world_frame: odom
 
-    # 不对外发布 tf 树 (为了简单起见，我们直接读它发布的话题)
+    # 不对外发布 tf 树
     publish_tf: false
 
     # 1. 模拟 DVL 配置 (输入机体速度 Vx, Vy, Vz)
@@ -31,11 +32,21 @@ ekf_filter_node:
                    false, false, false]
     pose0_differential: false
 
-    # 3. 模拟 IMU 配置 (输入姿态 角)
+    # 3. IMU 配置 (姿态 + 角速度 + 线加速度)
     imu0: /sensor/imu
     imu0_config: [false, false, false,
                   true,  true,  true,    # 融合姿态 (Roll, Pitch, Yaw)
                   false, false, false,
-                  false, false, false,
-                  false, false, false]
+                  true,  true,  true,    # 融合角速度 (vroll, vpitch, vyaw)
+                  true,  true,  true]    # 融合线加速度 (ax, ay, az)
     imu0_differential: false
+    imu0_remove_gravitational_acceleration: true
+
+    # # 4. 视觉感知配置 (视觉 EKF: 绝对位置 X, Y 与 Yaw 校准)
+    # pose1: /sensor/aruco_pose
+    # pose1_config: [true,  true,  false,  # 融合计算出的绝对 X, Y
+    #                false, false, true,   # 融合航向角 Yaw (修正陀螺仪漂移)
+    #                false, false, false,
+    #                false, false, false,
+    #                false, false, false]
+    # pose1_differential: false

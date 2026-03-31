@@ -9,7 +9,9 @@
 import rclpy
 from rclpy.node import Node
 import math
+import os
 import time
+from pathlib import Path
 
 from nav_msgs.msg import Odometry
 from gz.transport13 import Node as GzNode
@@ -45,8 +47,14 @@ class USVSimulator(Node):
         # 通过 Gazebo 服务注入模型
         req = EntityFactory()
         req.name = "usv_aruco"
-        # 使用我们之前配置好带有 ArUco 纹理的板子
-        req.sdf_filename = "/home/jiayi/PX4-Autopilot/Tools/simulation/gz/models/ustrov/usv_target.sdf"
+
+        # 使用环境变量或常见目录自动定位模型路径，避免硬编码路径失效
+        model_path = self._resolve_usv_model_path()
+        if model_path is None:
+            self.get_logger().error("未找到 usv_target.sdf，请设置 PX4_AUTOPILOT_PATH 环境变量")
+            return
+
+        req.sdf_filename = str(model_path)
         req.allow_renaming = True
         
         # 发送请求 (需要 5 个参数: 服务名、请求实例、请求类型、响应类型、超时时间)
@@ -57,15 +65,36 @@ class USVSimulator(Node):
         else:
             self.get_logger().warn("⚠️ USV 目标未生成(可能已存在)。")
 
+    def _resolve_usv_model_path(self):
+        candidates = []
+
+        px4_path = os.environ.get("PX4_AUTOPILOT_PATH")
+        if px4_path:
+            candidates.append(Path(px4_path) / "Tools/simulation/gz/models/ustrov/usv_target.sdf")
+
+        home = Path.home()
+        candidates.append(home / "PX4-Autopilot/Tools/simulation/gz/models/ustrov/usv_target.sdf")
+
+        # 从当前文件位置推导工作区，再尝试 sibling 目录下 PX4-Autopilot
+        ws_root = Path(__file__).resolve().parents[3]
+        candidates.append(ws_root.parent / "PX4-Autopilot/Tools/simulation/gz/models/ustrov/usv_target.sdf")
+
+        for path in candidates:
+            if path.exists():
+                self.get_logger().info(f"使用 USV 模型: {path}")
+                return path
+
+        return None
+
     def _timer_cb(self):
         t = time.time() - self.start_time
         
-        # 计算 USV 当前应该在的位置 (走圆形)
-        current_x = self.radius * math.cos(self.speed * t)
-        current_y = self.radius * math.sin(self.speed * t)
+        # 固定 USV 当前位置为静止绝对坐标 (例如 0, 0)
+        current_x = 0.0
+        current_y = 0.0
         
-        # 计算 USV 的朝向 (切线方向 yaw)
-        current_yaw = (self.speed * t) + (math.pi / 2.0)
+        # 固定USV的朝向
+        current_yaw = 0.0
         
         # ==========================================
         # 1. 强制在 Gazebo 里移动物理模型 (让 ROV 相机能看到它的位移)

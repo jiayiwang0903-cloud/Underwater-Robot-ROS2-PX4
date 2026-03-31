@@ -11,6 +11,7 @@ class PIDController:
         self.limit = limit
         self.integral = 0.0
         self.prev_error = 0.0
+        self.filtered_derivative = 0.0
 
     def update(self, error: float, dt: float) -> float:
         self.integral += error * dt
@@ -18,12 +19,17 @@ class PIDController:
         i_limit = self.limit / self.ki if self.ki != 0 else self.limit
         self.integral = np.clip(self.integral, -i_limit, i_limit)
 
-        derivative = (error - self.prev_error) / dt if dt > 0 else 0.0
+        raw_derivative = (error - self.prev_error) / dt if dt > 0 else 0.0
         self.prev_error = error
 
-        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        # 增加一阶低通滤波(EMA)以平滑微分项的噪声放大
+        alpha = 0.2
+        self.filtered_derivative = alpha * raw_derivative + (1.0 - alpha) * self.filtered_derivative
+
+        output = self.kp * error + self.ki * self.integral + self.kd * self.filtered_derivative
         return float(np.clip(output, -self.limit, self.limit))
 
     def reset(self):
         self.integral = 0.0
         self.prev_error = 0.0
+        self.filtered_derivative = 0.0

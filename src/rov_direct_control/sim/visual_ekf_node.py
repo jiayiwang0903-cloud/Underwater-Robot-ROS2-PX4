@@ -52,11 +52,11 @@ class VisualEKFNode(Node):
         
         # 初始化一个用于显示的独立窗口线程，方便我们看效果
         cv2.namedWindow("ROV Upward View", cv2.WINDOW_AUTOSIZE)
-        # 用 timer 机制防止 cv2.imshow 卡死
+        # init 用 timer 机制防止 cv2.imshow 卡死
         self.create_timer(0.05, self._cv_refresh_cb)
         self.current_frame = None
         
-        self.get_logger().info("🔥 视觉定位节点启动中...正在扫描上方水面 ArUco")
+        self.get_logger().info("视觉定位节点启动中...正在扫描上方水面 ArUco")
 
     def _cv_refresh_cb(self):
         if self.current_frame is not None:
