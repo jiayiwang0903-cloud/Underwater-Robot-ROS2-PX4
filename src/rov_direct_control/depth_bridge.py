@@ -24,15 +24,15 @@ class DepthBridge(Node):
     def __init__(self):
         super().__init__('depth_bridge')
 
-        self.declare_parameter('pressure_topic', '/fmu/out/sensor_baro')
-        self.declare_parameter('depth_topic', '/sensor/depth')
-        self.declare_parameter('water_density', 1025.0)  # kg/m^3, seawater default
+        self.declare_parameter('pressure_topic', '/fmu/out/sensor_baro') #默认订阅 PX4 的气压计数据
+        self.declare_parameter('depth_topic', '/sensor/depth') #发布深度数据，供 EKF 使用
+        self.declare_parameter('water_density', 1025.0)  # kg/m^3 密度
         self.declare_parameter('gravity', 9.80665)  # m/s^2
-        self.declare_parameter('surface_pressure_pa', -1.0)  # <=0 means auto-calibration
-        self.declare_parameter('calibration_samples', 80)
-        self.declare_parameter('depth_covariance_z', 0.05)
-        self.declare_parameter('min_depth_m', 0.0)
-        self.declare_parameter('frame_id', 'odom')
+        self.declare_parameter('surface_pressure_pa', -1.0)  #如果提供了正值，则直接使用该值作为水面压力基准，否则自动从前 N 个样本平均计算 P0
+        self.declare_parameter('calibration_samples', 80) #样本数量，前80个样本平均作为水面压力基准
+        self.declare_parameter('depth_covariance_z', 0.05)  #深度测量的协方差，供 EKF 使用
+        self.declare_parameter('min_depth_m', 0.0)  #最小深度限制，防止水面扰动导致的负深度值
+        self.declare_parameter('frame_id', 'odom')  #深度坐标系
 
         self.pressure_topic = self.get_parameter('pressure_topic').get_parameter_value().string_value
         self.depth_topic = self.get_parameter('depth_topic').get_parameter_value().string_value
@@ -46,39 +46,32 @@ class DepthBridge(Node):
 
         self._pressure_window = deque(maxlen=max(1, self.calibration_samples))
         self._surface_pressure_ready = self.surface_pressure_pa > 0.0
-        self._msg_count = 0
-        self._pub_count = 0
+        self._msg_count = 0 #接收的气压样本数量
+        self._pub_count = 0 #发布的深度消息数量
         self._warned_no_data = False
-        self._last_pressure_pa = 0.0
-        self._last_depth_m = 0.0
+        self._last_pressure_pa = 0.0 #最后一个接收到的压力值
+        self._last_depth_m = 0.0 #最后一个发布的深度值
+
 
         qos = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
             depth=1,
         )
-
-        self.pub_depth = self.create_publisher(PoseWithCovarianceStamped, self.depth_topic, 10)
+        # 发布深度消息，供 EKF 订阅
+        self.pub_depth = self.crODOM pose (NED)     x=  0.000 y=  0.000 z=  0.002 yaw=   0.00
+DVL  vel [m/s]       vx=  0.000 vy=  0.000 vz=  0.000
+DEPTH bridge          z=  0.011 m
+eate_publisher(PoseWithCovarianceStamped, self.depth_topic, 10)
         self.sub_pressure = self.create_subscription(
             SensorBaro,
             self.pressure_topic,
             self._pressure_cb,
             qos,
         )
-
-        # Some PX4/px4_msgs combinations expose versioned topics (e.g. *_v1).
-        self._fallback_pressure_topic = '/fmu/out/sensor_baro_v1'
-        self.sub_pressure_v1 = None
-        if self.pressure_topic != self._fallback_pressure_topic:
-            self.sub_pressure_v1 = self.create_subscription(
-                SensorBaro,
-                self._fallback_pressure_topic,
-                self._pressure_cb,
-                qos,
-            )
-
+        
         self.create_timer(1.0, self._stats_timer)
-
+        
         if self._surface_pressure_ready:
             self.get_logger().info(
                 f'DepthBridge: using fixed surface pressure P0={self.surface_pressure_pa:.1f} Pa'
@@ -91,10 +84,7 @@ class DepthBridge(Node):
         self.get_logger().info(
             f'DepthBridge: {self.pressure_topic} -> {self.depth_topic}, rho={self.rho}, g={self.g}'
         )
-        if self.sub_pressure_v1 is not None:
-            self.get_logger().info(
-                f'DepthBridge: fallback subscription enabled on {self._fallback_pressure_topic}'
-            )
+
 
     def _pressure_cb(self, msg: SensorBaro):
         self._msg_count += 1
