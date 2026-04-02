@@ -24,14 +24,14 @@ class USTROVDirectController(Node):
         # 通过环境变量配置：
         # USTROV_TARGET_MODE=absolute|relative (默认 absolute)
         # USTROV_TARGET_X / Y / DEPTH / YAW 用于覆盖目标值
-        self.target_mode = os.getenv('USTROV_TARGET_MODE', 'absolute').strip().lower()
-        self.target_x = float(os.getenv('USTROV_TARGET_X', '1.0'))
-        self.target_y = float(os.getenv('USTROV_TARGET_Y', '1.0'))
-        self.target_depth = float(os.getenv('USTROV_TARGET_DEPTH', '5.0'))
+        self.target_mode = os.getenv('USTROV_TARGET_MODE', 'relative').strip().lower()
+        self.target_x = float(os.getenv('USTROV_TARGET_X', '0.0'))
+        self.target_y = float(os.getenv('USTROV_TARGET_Y', '0.0'))
+        self.target_depth = float(os.getenv('USTROV_TARGET_DEPTH', '5'))
         self.target_yaw = float(os.getenv('USTROV_TARGET_YAW', '0.0'))
         self._targets_initialized = False
         self.dt = 0.02
-        self.log_every_ticks = int(os.getenv('USTROV_LOG_EVERY_TICKS', '50'))
+        self.log_every_ticks = int(os.getenv('USTROV_LOG_EVERY_TICKS', '1'))
 
         # 控制器
         self.pid_x = PIDController(kp=20.0, ki=2.0, kd=10.0, limit=100.0)
@@ -43,15 +43,17 @@ class USTROVDirectController(Node):
         self.estimator = EKFEstimator(self)
 
         # 推力执行后端硬编码切换: 'gazebo' 或 'px4'
-        self.thruster_backend = 'gazebo'
+        self.thruster_backend = 'px4'
 
         # 硬件接口 (PX4) 或 Gazebo 直驱接口
         self.px4 = None
-        if self.thruster_backend == 'gazebo':
-            self.thrusters = GzThrusterInterface(model_name='ustrov_0')
-        else:
+        if self.thruster_backend == 'px4':
+            # 修正：后端为 px4 时，加载真实硬件接口
             self.px4 = PX4Interface(self)
             self.thrusters = PX4ActuatorInterface(self)
+        else:
+            # 修正：否则加载仿真接口
+            self.thrusters = GzThrusterInterface(model_name='ustrov_0')
 
         # 状态变量
         self.tick = 0
@@ -143,16 +145,16 @@ class USTROVDirectController(Node):
         allocated_thrusts = allocate(tau)
         self.thrusters.send(allocated_thrusts)
 
-        if self.tick % max(1, self.log_every_ticks) == 0:
+        if self.tick % max(1, self.log_every_ticks) == 0: 
             thrusters_str = ', '.join(f'T{i}:{v:.1f}' for i, v in enumerate(allocated_thrusts))
             self.get_logger().info(
-                f'X:{state.x:.1f}(→{self.target_x}) '
-                f'Y:{state.y:.1f}(→{self.target_y}) '
-                f'Z:{state.z:.1f}(→{self.target_depth}) '
-                f'Yaw:{math.degrees(state.yaw):.0f}(→{math.degrees(self.target_yaw):.0f}) '
-                f'/ 力[X Y Z Yaw]=[{tau_x:.1f}, {tau_y:.1f}, {tau_z:.1f}, {tau_yaw:.1f}] '
-                f'/ 推进器[{thrusters_str}] '
-                f'/ 后端:{self.thruster_backend}'
+                f'X:{state.x:.3f}(→  {self.target_x}) \n'
+                f'Y:{state.y:.3f}(→  {self.target_y}) \n'
+                f'Z:{state.z:.3f}(→  {self.target_depth}) \n'
+                f'Yaw:{math.degrees(state.yaw):.0f}(→{math.degrees(self.target_yaw):.0f})\n'
+                f'      力[X Y Z Yaw]=[{tau_x:.1f}, {tau_y:.1f}, {tau_z:.1f}, {tau_yaw:.1f}]\n'
+                f'      推进器[{thrusters_str}]\n'
+                f'      后端:{self.thruster_backend}'
             )
 
 def main(args=None):
