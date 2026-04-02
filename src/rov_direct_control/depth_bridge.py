@@ -59,10 +59,8 @@ class DepthBridge(Node):
             depth=1,
         )
         # 发布深度消息，供 EKF 订阅
-        self.pub_depth = self.crODOM pose (NED)     x=  0.000 y=  0.000 z=  0.002 yaw=   0.00
-DVL  vel [m/s]       vx=  0.000 vy=  0.000 vz=  0.000
-DEPTH bridge          z=  0.011 m
-eate_publisher(PoseWithCovarianceStamped, self.depth_topic, 10)
+        self.pub_depth = self.create_publisher(
+            PoseWithCovarianceStamped, self.depth_topic, 10)
         self.sub_pressure = self.create_subscription(
             SensorBaro,
             self.pressure_topic,

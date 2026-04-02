@@ -28,7 +28,7 @@ B_ALLOC = np.array([
 B_PINV = np.linalg.pinv(B_ALLOC)
 
 
-def allocate(tau: np.ndarray, clip: float = 500.0) -> np.ndarray:
+def allocate(tau: np.ndarray, clip: float = 100.0) -> np.ndarray:
     """将 6-DOF 力矩向量解算为 8 路推力，并限幅。"""
     thrusts = B_PINV @ tau
     return np.clip(thrusts, -clip, clip)
