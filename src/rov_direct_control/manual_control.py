@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
 Manual Control Node for ROV Direct Control
-提供一个基于命令行和手柄输入的手动控制接口
 """
 
 import sys
@@ -22,11 +21,9 @@ from allocator import allocate
 class ManualControlNode(Node):
     def __init__(self):
         super().__init__('manual_control_node')
-        
         self.px4_cmd = PX4Interface(self)
         self.px4_act = PX4ActuatorInterface(self)
         
-        # 定义与 PX4 匹配的 QoS (Best Effort)
         qos_profile = QoSProfile(
             reliability=ReliabilityPolicy.BEST_EFFORT,
             history=HistoryPolicy.KEEP_LAST,
@@ -46,7 +43,7 @@ class ManualControlNode(Node):
         
         self.active_thrusts = np.full(8, np.nan, dtype=float) #初始化
         self.arm_sequence_tick = -1     #tick追踪
-        
+        self.last_buttons = []
         self.create_timer(0.02, self._timer_callback) # 50Hz 维持 PX4 Offboard 心跳和 Actuator 消息
         self.get_logger().info("Manual Control Node 已启动")
 
@@ -93,30 +90,43 @@ class ManualControlNode(Node):
         tau[5] = rs_x * MAX_M_Z              # Yaw 绕Z旋转
 
         # 只有在有输入时，才覆盖当前推力值，避免影响手敲指令
+        # 只有在有输入时，才覆盖当前推力值
         if not np.allclose(tau, 0.0, atol=0.01):
-            # 将推力截取限制在 [-1.0, 1.0]
             thrusts = allocate(tau, clip=1.0)
             self.active_thrusts[:] = thrusts
             self._joy_controlled = True
         else:
-            # 当手柄摇杆归中时，如果是从手柄控制转来的，将推力归为0
+            # 【修复 3】归中时，给 0.0 而不是 NaN。
+            # 如果给 NaN，PX4 会认为丢失了控制目标（Setpoint），从而意外切出 Offboard 或掉落！
             if getattr(self, '_joy_controlled', False):
-                self.active_thrusts.fill(np.nan)
+                self.active_thrusts.fill(0.0)
                 self._joy_controlled = False
 
-
-        # 手柄按键快捷操作：
-        # msg.buttons[7] (Start键) -> 解锁
-        # msg.buttons[6] (Back键) -> 上锁
-        if len(msg.buttons) >= 8:
-            if msg.buttons[7] == 1 and not self.is_armed:
-                self.arm_sequence_tick = 0  # [修改] 触发解锁状态机
-                self.get_logger().info('手柄: 已请求解锁')
-            elif msg.buttons[6] == 1 :
-            #and self.is_armed:
+        # ================= 边缘检测核心逻辑 =================
+        if not self.last_buttons:
+            self.last_buttons = list(msg.buttons)
+            return
+            
+        if len(msg.buttons) >= 8 and len(self.last_buttons) >= 8:
+            # 只有在上一帧是 0，这一帧是 1 的“瞬间”才为 True
+            start_pressed = (msg.buttons[7] == 1 and self.last_buttons[7] == 0)
+            back_pressed = (msg.buttons[6] == 1 and self.last_buttons[6] == 0)
+            
+            if start_pressed and not self.is_armed:
+                self.arm_sequence_tick = 0 
+                # 关键：解锁瞬间必须保证发送的是有效数字，不能是 NaN
+                if np.isnan(self.active_thrusts[0]):
+                    self.active_thrusts.fill(0.0)
+                self.get_logger().info('手柄: 已请求安全解锁序列...')
+                
+            elif back_pressed:
                 self.px4_cmd._send_command(400, 0.0, 21196.0)
-                self.active_thrusts.fill(np.nan)
+                self.active_thrusts.fill(np.nan) # 上锁后可以恢复 NaN 让电机休眠
                 self.get_logger().info('手柄: 已发送上锁指令')
+
+        # 更新历史按键状态，为下一帧做准备
+        self.last_buttons = list(msg.buttons)
+      
 
     def _timer_callback(self):
         self.px4_cmd.send_offboard_mode() #维持 Offboard 心跳
@@ -209,8 +219,7 @@ def console_input_thread(node: ManualControlNode):
 
         parts = cmd.split()
         if len(parts) != 2:
-            print("格式错误。请输入: [编号] [推力值] 或者 'z [推力值]'")
-            continueMotorTestNode
+            print("格式错误。请输入: [编号] [推力值] 或者 'z [推力值]'") 
             
         # 处理垂直电机批处理命令 'z'
         if parts[0] == 'z':
