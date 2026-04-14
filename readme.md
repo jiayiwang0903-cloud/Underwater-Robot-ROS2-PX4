@@ -13,8 +13,7 @@ ROS 2 版本: Humble
 
 1.2 创建工作空间与拉取依赖代码
 
-
-Bash
+```bash
 # 1. 创建并进入 ROS 2 工作空间的 src 目录
 mkdir -p ~/ws_ustrov/src
 cd ~/ws_ustrov/src
@@ -36,44 +35,48 @@ colcon build
 # 将环境写入 bashrc（只需执行一次），确保每次打开终端都能找到程序
 echo "source ~/ws_ustrov/install/setup.bash" >> ~/.bashrc
 source ~/.bashrc
+```
 
 💻 2. 仿真模式 (Simulation)
 ⚠️ 核心检查: 启动前，请打开主程序（main.py 或 controller_node.py）和状态估计（state_estimator.py），确保将推力执行后端设置为仿真：self.thruster_backend = 'gazebo'。
 
 步骤 1：启动 PX4 仿真环境 (在 PX4-Autopilot 源码目录下执行)
 
-Bash
-
+```bash
 cd ~/PX4-Autopilot
 make px4_sitl gz_ustrov
+```
+
 步骤 2：启动 DDS 通信桥接 (连接 PX4 与 ROS 2)
 
-Bash
-
+```bash
 cd ~/Micro-XRCE-DDS-Agent
 MicroXRCEAgent udp4 -p 8888
+```
+
 步骤 3：启动感知与控制系统 (打开新终端)
 
-Bash
-
+```bash
 # 1. 启动传感器与视觉大脑脚本
 ~/ws_ustrov/src/rov_direct_control/sim/start_perception_brain.sh 
 
 # 2. 启动主控程序
 python3 ~/ws_ustrov/src/rov_direct_control/main.py
+```
+
 🌊 3. 实机模式 (Real Hardware)
 ⚠️ 核心检查: 下水前，必须将代码后端调整至实机：self.thruster_backend = 'px4'。
 硬件注意: 由于实机水下线缆较长（>2米），为防止 TTL 寄生电容导致信号严重丢包，DDS 串口波特率已降至 115200（飞控端参数也必须同步修改）。
 
 步骤 1：启动底层串口通信
 
-Bash
-
+```bash
 MicroXRCEAgent serial --dev /dev/ttyUSB0 -b 115200
+```
+
 步骤 2：启动传感器与数据桥接 (推荐使用 tmux 或打开多个终端运行)
 
-Bash
-
+```bash
 # 1. 启动 DVL 驱动节点
 ros2 launch dvl_a50 dvl_a50.launch.py ip_address:='192.168.194.95'
 
@@ -83,10 +86,11 @@ python3 ~/ws_ustrov/src/rov_direct_control/depth_bridge.py
 
 # 3. 启动 EKF 传感器融合节点
 ros2 run robot_localization ekf_node --ros-args --params-file ~/ws_ustrov/src/rov_direct_control/config/ekf_real.yaml
+```
+
 步骤 3：启动测试与主控
 
-Bash
-
+```bash
 # (下水前强烈推荐) 手柄开环推力测试，验证各桨叶转向
 # 需要先运行: ros2 run joy joy_node
 python3 ~/ws_ustrov/src/rov_direct_control/manual_control.py
@@ -96,6 +100,8 @@ python3 ~/ws_ustrov/src/rov_direct_control/monitor_px4.py
 
 # 启动闭环主控程序
 python3 ~/ws_ustrov/src/rov_direct_control/main.py
+```
+
 🛠️ 4. 故障排除 (Troubleshooting)
 在日常开发与联调中，如果遇到奇怪的报错，请优先查阅以下解决方案：
 
@@ -104,36 +110,39 @@ python3 ~/ws_ustrov/src/rov_direct_control/main.py
 原因：Ubuntu 默认安装的盲文显示器驱动 (brltty) 会霸占 CH340/CP2102 等 USB 串口设备。
 解决：彻底卸载该驱动：
 
-Bash
-
+```bash
 sudo systemctl stop brltty-udev.service
 sudo systemctl mask brltty-udev.service
 sudo systemctl stop brltty.service
 sudo systemctl disable brltty.service
 sudo apt-get remove --purge brltty -y
+```
+
 4.2 端口被占用 / 节点启动失败
 现象：启动 DDS 提示 UDP 8888 端口已被使用，或 Gazebo 崩溃卡死。
 解决：一键强制清理相关残留进程：
 
-Bash
-
+```bash
 pkill -f MicroXRCEAgent
 killall -9 px4 gz ruby
+```
+
 4.3 仿真模型修改未生效
 解决：清除 PX4 的缓存配置并重新编译：
 
-Bash
-
+```bash
 cd ~/PX4-Autopilot
 rm -rf build/px4_sitl_default/
 rm -f build/px4_sitl_default/bin/parameters*.bson
 make px4_sitl
-4.4 其他常用维护指令
-Bash
+```
 
+4.4 其他常用维护指令
+```bash
 # 切换至 Ubuntu 备用内核 (解决内核升级导致的网卡/显卡驱动掉线)
 sudo grub-reboot 2
 sudo reboot
 
 # 启动地面站 QGroundControl
 ./QGroundControl-x86_64.AppImage
+```
