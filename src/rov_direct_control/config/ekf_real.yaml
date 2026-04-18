@@ -40,8 +40,8 @@ ekf_filter_node:
     pose1_differential: false
 
     # 4. 实际 IMU 配置 (姿态 + 角速度 + 线加速度)
-    # 推荐由 bridge 节点把 PX4 IMU 转成 sensor_msgs/Imu 后发布到该话题。
-    imu0: /sensor/imu_real
+    # 由 imu_bridge.py 将 PX4 SensorCombined+VehicleAttitude 转为 sensor_msgs/Imu。
+    imu0: /sensor/imu
     imu0_config: [false, false, false,
                   true,  true,  true,
                   false, false, false,

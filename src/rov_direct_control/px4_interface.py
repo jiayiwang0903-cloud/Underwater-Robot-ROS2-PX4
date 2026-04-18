@@ -1,4 +1,11 @@
-"""PX4 通信层 — 封装 Offboard 模式切换和 Arm/Disarm。
+"""PX4 模式接口（mode interface）— Offboard 心跳、模式切换、Arm/Disarm。
+
+该模块不是 actuator backend，不负责推力下发。
+仅在 PX4 backend 模式下由 controller_node 激活。
+
+Output / 输出:
+  /fmu/in/offboard_control_mode  (px4_msgs/OffboardControlMode)  — Offboard 心跳
+  /fmu/in/vehicle_command        (px4_msgs/VehicleCommand)        — 模式切换 / Arm / Disarm
 """
 
 from rclpy.node import Node

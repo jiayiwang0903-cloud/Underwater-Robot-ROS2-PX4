@@ -1,16 +1,22 @@
-"""推力发送层 — ROS 2 至 PX4 ActuatorMotors
-通过 Micro-XRCE-DDS 将推力指令发送给 Pixhawk，最终由其生成 PWM 信号控制实际电调(ESC)。
+"""PX4 actuator backend — 将 8 路推力（牛顿）归一化后发布 ActuatorMotors。
+
+通过 Micro-XRCE-DDS 发送给 PX4，由 PX4 生成 PWM 信号控制 ESC。
+实现 ActuatorBackend 统一接口，可由 backend_factory 创建。
+
+Output / 输出:
+  /fmu/in/actuator_motors  (px4_msgs/ActuatorMotors)  — 8 路归一化推力 [-1, 1]
 """
 
 import numpy as np
-import os
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from px4_msgs.msg import ActuatorMotors
 
+from actuator_backend import ActuatorBackend
+
 NUM_THRUSTERS = 8
 
-class PX4ActuatorInterface:
+class PX4ActuatorInterface(ActuatorBackend):
     def __init__(self, node: Node):
         self._node = node
         

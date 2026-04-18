@@ -1,241 +1,237 @@
 # rov_direct_control
 
-USTROV direct-control stack based on ROS 2 + PX4.
+**This repository is an external ROS 2 low-level control stack for ROV, not a PX4 replacement.**
 
-USTROV 基于 ROS 2 + PX4 的直接控制代码栈。
+USTROV external low-level control stack. It reads fused state, computes control outputs, allocates thruster forces, and sends them to a pluggable actuator backend (Gazebo or PX4).
 
+USTROV 外部低层控制栈。读取融合状态、计算控制输出、分配推力、通过可替换后端（Gazebo 或 PX4）下发执行。
 
-## 1. Architecture Overview / 架构总览
+## Scope / 职责边界
 
-### 1.1 Real Vehicle Path / 实际控制链路
+This stack is responsible for:
+1. Reading estimated state from a unified interface (`/odometry/filtered`).
+2. Computing low-level 4-DOF control outputs (X/Y/Z/Yaw).
+3. Allocating generalized wrench to 8 thruster forces via pseudo-inverse.
+4. Sending thruster commands through a pluggable actuator backend.
 
-1. EKF publishes fused state on `/odometry/filtered`.
-2. `controller_node.py` reads state and computes 4-DOF control (`X/Y/Z/Yaw`).
-3. `allocator.py` maps wrench `[Fx, Fy, Fz, Mx, My, Mz]` to 8 thruster forces.
-4. `px4_actuator.py` publishes `ActuatorMotors` to `/fmu/in/actuator_motors`.
-5. PX4 outputs PWM to ESC/thrusters.
+本栈的职责：
+1. 从统一状态接口（`/odometry/filtered`）读取估计状态。
+2. 计算 4 自由度低层控制输出（X/Y/Z/Yaw）。
+3. 通过伪逆矩阵将广义力/力矩分配为 8 路推进器推力。
+4. 通过可替换的执行后端下发推力指令。
 
-1. EKF 在 `/odometry/filtered` 输出融合状态。
-2. `controller_node.py` 读取状态并计算 4 自由度控制量（`X/Y/Z/Yaw`）。
-3. `allocator.py` 将 `[Fx, Fy, Fz, Mx, My, Mz]` 分配为 8 路推进器推力。
-4. `px4_actuator.py` 发布 `ActuatorMotors` 到 `/fmu/in/actuator_motors`。
-5. PX4 输出 PWM 至 ESC/推进器。
+This stack does **NOT** replace:
+- PX4 flight controller core (mode state machine, failsafe, built-in estimators, driver framework).
+- PX4 is still responsible for: offboard mode admission, arm/disarm authorization, actuator PWM/ESC output (in PX4 backend mode).
+- Gazebo is only the simulation execution environment and sensor source.
 
-### 1.2 PX4 Mode Path / PX4 模式控制链路
+本栈**不**替代：
+- PX4 飞控内核（模式状态机、failsafe、内建估计器、驱动框架）。
+- PX4 仍负责：offboard 接入、arm/disarm 授权、PWM/ESC 输出（PX4 后端模式下）。
+- Gazebo 仅为仿真执行环境与传感器来源。
 
-1. `px4_interface.py` keeps sending `/fmu/in/offboard_control_mode` heartbeat.
-2. Controller sends `VehicleCommand` for OFFBOARD + ARM/DISARM.
+## Architecture / 架构分层
 
-1. `px4_interface.py` 持续发送 `/fmu/in/offboard_control_mode` 心跳。
-2. 控制器发送 `VehicleCommand` 执行 OFFBOARD + ARM/DISARM。
+```
+ State Source Layer        Control Layer         Allocation Layer      Actuation Backend Layer
+ ┌──────────────┐    ┌───────────────────┐    ┌──────────────┐    ┌─────────────────────┐
+ │ EKF          │    │ controller_node   │    │ allocator    │    │ GazeboBackend       │
+ │ /odometry/   │───>│ 4-DOF PID         │───>│ B+ * tau     │───>│   or                │
+ │  filtered    │    │ (X, Y, Z, Yaw)    │    │ -> 8 thrusts │    │ PX4ActuatorBackend  │
+ └──────────────┘    └───────────────────┘    └──────────────┘    └─────────────────────┘
+                            │ (PX4 only)
+                     ┌──────┴──────┐
+                     │ PX4Interface│
+                     │ (mode/arm)  │
+                     └─────────────┘
+```
 
-### 1.3 Simulation Path / 仿真链路
+Four layers:
+1. **State source layer** — EKF provides fused state via `/odometry/filtered`.
+2. **Control layer** — `controller_node.py` computes 4-DOF PID control outputs.
+3. **Allocation layer** — `allocator.py` maps 6-DOF wrench to 8 thruster forces.
+4. **Actuation backend layer** — pluggable backend sends thruster commands to Gazebo or PX4.
 
-All simulation components are under `sim/`.
+Additionally, `px4_interface.py` is a **mode interface** (not an actuator backend): it handles offboard heartbeat, mode switching, and arm/disarm — only active in PX4 backend mode.
 
-仿真相关组件全部位于 `sim/`。
+四层架构：
+1. **状态源层** — EKF 通过 `/odometry/filtered` 提供融合状态。
+2. **控制层** — `controller_node.py` 计算 4 自由度 PID 控制输出。
+3. **分配层** — `allocator.py` 将 6 自由度力矩映射为 8 路推进器推力。
+4. **执行后端层** — 可替换后端将推力指令发送到 Gazebo 或 PX4。
 
-1. `sim/sim_sensors.py` converts Gazebo truth into noisy IMU/DVL/Depth topics.
-2. `robot_localization` (with `config/ekf.yaml`) fuses sensor topics into `/odometry/filtered`.
-3. `sim/error_analyzer.py` compares EKF estimate with Gazebo ground truth.
-4. Optional visual source: `sim/visual_ekf_node.py` publishes `/sensor/aruco_pose`.
+此外，`px4_interface.py` 是**模式接口**（非执行后端）：负责 offboard 心跳、模式切换、arm/disarm——仅在 PX4 后端模式下激活。
 
-1. `sim/sim_sensors.py` 将 Gazebo 真值转换为带噪声的 IMU/DVL/Depth 话题。
-2. `robot_localization`（参数文件 `config/ekf.yaml`）融合后输出 `/odometry/filtered`。
-3. `sim/error_analyzer.py` 对比 EKF 估计和 Gazebo 真值误差。
-4. 可选视觉源：`sim/visual_ekf_node.py` 发布 `/sensor/aruco_pose`。
+## Code Map / 文件职责
 
-## 2. Code Map / 文件职责
+### Core / 核心模块
 
-### Core (real + common) / 核心模块（实机+通用）
+| File | Role |
+|------|------|
+| `main.py` | Entry point, spins `USTROVDirectController` / 入口 |
+| `controller_node.py` | 4-DOF control loop (50 Hz), orchestrates PID + allocation + backend / 4 自由度控制循环 |
+| `pid.py` | Generic PID with integral clamp + filtered derivative / 通用 PID |
+| `allocator.py` | 6-DOF wrench to 8-thruster allocation (pseudo-inverse) / 推力分配 |
+| `state_estimator.py` | State abstraction; `EKFEstimator` subscribes `/odometry/filtered` / 状态估计抽象 |
 
-- `main.py`
-  Entry point, spins `USTROVDirectController`.
-  入口文件，启动 `USTROVDirectController`。
+### Actuation Backend / 执行后端
 
-- `controller_node.py`
-  Main control loop, PID, coordinate transform, allocation, actuator publish.
-  主控制循环，执行 PID、坐标变换、推力分配与执行发布。
+| File | Role |
+|------|------|
+| `actuator_backend.py` | Abstract base class for actuator backends / 执行后端抽象基类 |
+| `backend_factory.py` | Factory: creates `(actuator_backend, mode_interface)` from parameter / 工厂函数 |
+| `px4_actuator.py` | **PX4 actuator backend**: normalizes thrust and publishes `ActuatorMotors` / PX4 执行后端 |
+| `px4_interface.py` | **PX4 mode interface**: offboard heartbeat + arm/disarm (not an actuator backend) / PX4 模式接口 |
+| `sim/gz_thruster.py` | **Gazebo actuator backend**: sends thrust via Gazebo transport / Gazebo 执行后端 |
 
-- `pid.py`
-  Generic PID (integral clamp + filtered derivative).
-  通用 PID（积分限幅 + 微分低通滤波）。
+### Target Interface / 目标接口
 
-- `allocator.py`
-  6-DOF wrench to 8-thruster allocation using pseudo-inverse.
-  使用伪逆矩阵将 6 自由度力矩分配到 8 推进器。
+The controller accepts target pose via ROS topic:
 
-- `state_estimator.py`
-  Estimator abstraction and `EKFEstimator` subscriber for `/odometry/filtered`.
-  状态估计抽象层与 `EKFEstimator`（订阅 `/odometry/filtered`）。
+控制器通过 ROS topic 接收目标位姿：
 
-- `px4_interface.py`
-  Offboard heartbeat and vehicle arm/disarm commands.
-  Offboard 心跳与解锁/上锁指令接口。
+- **Topic**: `/ustrov/target_pose`
+- **Type**: `geometry_msgs/PoseStamped`
+- **Fields**:
+  - `pose.position.x` -> target X (NED north, meters)
+  - `pose.position.y` -> target Y (NED east, meters)
+  - `pose.position.z` -> target depth (**positive = deeper**, NED down convention)
+  - `pose.orientation` -> target yaw (quaternion; only yaw is used, roll/pitch ignored)
+- **frame_id**: `"ned"` (NED convention: z > 0 means underwater)
 
-- `px4_actuator.py`
-  Converts thrust array to PX4 `Actu            'DVL bridge started / 启动成功: '
-atorMotors` message and publishes to FMU input.
-  将推力数组转换为 PX4 `ActuatorMotors` 消息并发布到 FMU 输入。
+**Priority**: topic target overrides environment variable defaults. Environment variables (`USTROV_TARGET_X/Y/DEPTH/YAW`) serve only as startup defaults.
 
-- `test_motors.py`
-  Manual motor test utility for direct channel validation.
-  电机手动测试工具，用于直接验证通道链路。
+**优先级**：topic 目标覆盖环境变量默认值。环境变量仅作为启动默认目标。
+
+### Sensor Bridges / 传感器桥接
+
+Bridges convert raw sensor data into EKF-consumable standard ROS messages. Simulation uses `sim/sim_sensors.py` to publish the same topics directly.
+
+Bridge 将原始传感器数据转换为 EKF 可融合的标准 ROS 消息。仿真模式下由 `sim/sim_sensors.py` 直接发布相同话题。
+
+| Bridge | Input | Output (EKF) | Used by |
+|--------|-------|--------------|---------|
+| `imu_bridge.py` | `/fmu/out/sensor_combined` + `/fmu/out/vehicle_attitude` | `/sensor/imu` (`Imu`) | `ekf_real.yaml` |
+| `dvl_bridge.py` | `/dvl/data` + `/dvl/position` | `/sensor/dvl` (`TwistWithCovarianceStamped`) + `/sensor/dvl_pose` (`PoseWithCovarianceStamped`) | `ekf_real.yaml` |
+| `depth_bridge.py` | `/fmu/out/sensor_baro` | `/sensor/depth` (`PoseWithCovarianceStamped`) | both `ekf.yaml` / `ekf_real.yaml` |
+| `sim/sim_sensors.py` | Gazebo dynamic pose | `/sensor/imu` + `/sensor/dvl` + `/sensor/depth` | `ekf.yaml` |
+
+### Hardware Support / 硬件支持
+
+| File | Role |
+|------|------|
+| `manual_control.py` | Joystick teleoperation + open-loop thrust testing / 手柄遥控 |
+| `monitor_px4.py` | Real-time sensor monitoring dashboard / 传感器监控面板 |
 
 ### Config / 配置
 
-- `config/ekf.yaml`
-  `robot_localization` EKF sensor fusion configuration.
-  `robot_localization` 的 EKF 传感器融合配置。
+| File | Role |
+|------|------|
+| `config/ekf.yaml` | EKF config for simulation / 仿真 EKF 配置 |
+| `config/ekf_real.yaml` | EKF config for real hardware / 实机 EKF 配置 |
 
-### Simulation (`sim/`) / 仿真模块（`sim/`）
+### Simulation (`sim/`) / 仿真模块
 
-- `sim/start_perception_brain.sh`
-  One-command startup for simulation perception + EKF pipeline.
-  一键启动仿真感知 + EKF 融合链路。
+| File | Role |
+|------|------|
+| `sim/sim_sensors.py` | Gazebo truth -> noisy IMU/DVL/Depth / 仿真传感器噪声注入 |
+| `sim/error_analyzer.py` | EKF vs ground truth visualization / EKF 误差可视化 |
+| `sim/visual_ekf_node.py` | ArUco-based visual localization / ArUco 视觉定位 |
+| `sim/usv_simulator.py` | USV spawn + GPS-like odometry / 水面 USV 仿真 |
+| `sim/start_perception_brain.sh` | One-command simulation perception startup / 一键启动仿真感知 |
 
-- `sim/sim_sensors.py`
-  Generates noisy IMU/DVL/Depth from Gazebo dynamic pose.
-  从 Gazebo 动态位姿生成带噪 IMU/DVL/Depth。
-
-- `sim/error_analyzer.py`
-  Live EKF-vs-ground-truth error visualization.
-  实时显示 EKF 与真值误差。
-
-- `sim/visual_ekf_node.py`
-  ArUco-based visual relative localization.
-  基于 ArUco 的视觉相对定位。
-
-- `sim/usv_simulator.py`
-  USV target spawn/motion and GPS-like odometry publisher.
-  水面 USV 目标生成/运动与 GPS 类里程计发布。
-
-- `sim/gz_thruster.py`
-  Gazebo transport-based direct thruster command helper.
-  基于 Gazebo transport 的推力直连接口。
-            'DVL bridge started / 启动成功: '
-
-## 3. Real Controller Details / 实机控制细节
-
-### `USTROVDirectController` (`controller_node.py`)
-
-- Loop rate: `50 Hz` (`dt = 0.02`).
-- 主循环频率：`50 Hz`（`dt = 0.02`）。
-
-Per tick / 每个周期：
-1. Send Offboard heartbeat / 发送 Offboard 心跳。
-2. Try OFFBOARD + ARM after warmup ticks / 预热后尝试切换 OFFBOARD 并解锁。
-3. Read `RovState` from estimator / 从估计器读取 `RovState`。
-4. Compute body-frame errors and PID outputs / 计算机体系误差与 PID 输出。
-5. Clamp control outputs (`tau_x/y/z/yaw`) / 对控制量进行限幅。
-6. Allocate thrust and publish actuator command / 分配推力并发布执行指令。
-
-### `PX4ActuatorInterface` (`px4_actuator.py`)
-
-- Input: 8-element thrust array in Newtons.
-- 输入：8 路推进器推力（牛顿）。
-
-Processing / 处理过程：
-1. Normalize by `max_thrust_newtons` (default `200.0`).
-2. Clip to `[-1.0, 1.0]`.
-3. Remap to `[0.0, 1.0]`.
-4. Fill unused channels with `NaN`.
-5. Publish `/fmu/in/actuator_motors`.
-
-1. 按 `max_thrust_newtons`（默认 `200.0`）归一化。
-2. 限幅到 `[-1.0, 1.0]`。
-3. 线性映射到 `[0.0, 1.0]`。
-4. 未用通道填充 `NaN`。
-5. 发布 `/fmu/in/actuator_motors`。
-
-## 4. Topics / 关键话题
+## Topics / 关键话题
 
 ### Published by control stack / 控制栈发布
 
-- `/fmu/in/offboard_control_mode` (`px4_msgs/OffboardControlMode`)
-- `/fmu/in/vehicle_command` (`px4_msgs/VehicleCommand`)
-- `/fmu/in/actuator_motors` (`px4_msgs/ActuatorMotors`)
+| Topic | Type | Backend |
+|-------|------|---------|
+| `/fmu/in/offboard_control_mode` | `px4_msgs/OffboardControlMode` | PX4 only |
+| `/fmu/in/vehicle_command` | `px4_msgs/VehicleCommand` | PX4 only |
+| `/fmu/in/actuator_motors` | `px4_msgs/ActuatorMotors` | PX4 only |
+| `/model/.../cmd_thrust` (x8) | Gazebo `Double` | Gazebo only |
 
 ### Consumed by control stack / 控制栈订阅
 
-- `/odometry/filtered` (`nav_msgs/Odometry`)
+| Topic | Type |
+|-------|------|
+| `/odometry/filtered` | `nav_msgs/Odometry` |
+| `/ustrov/target_pose` | `geometry_msgs/PoseStamped` |
 
-### Simulation sensor topics / 仿真传感器话题
+## Run Modes / 运行模式
 
-- `/sensor/imu`
-- `/sensor/dvl`
-- `/sensor/depth`
-- `/sensor/aruco_pose` (optional; currently commented in EKF config)
-- `/sensor/aruco_pose`（可选；当前在 EKF 配置中注释）
-
-## 5. Run Modes / 运行模式
-
-### 5.1 Main controller / 主控制器
-
-Requirements / 前置条件：
-- Micro XRCE agent running.
-- PX4 SITL or hardware PX4 running.
-- EKF pipeline alive (`/odometry/filtered` available).
-
-
-
-- Micro XRCE Agent 已运行。
-- PX4 SITL 或实机 PX4 已运行。
-- EKF 融合链路可用（`/odometry/filtered` 有数据）。
+### Unified bringup (recommended) / 统一启动（推荐）
 
 ```bash
-ros2 run rov_direct_control main.py
+# Gazebo simulation: sensors + EKF + controller (one command)
+ros2 launch src/rov_direct_control/launch/sim_control.launch.py
+
+# PX4 real hardware: bridges + EKF + controller (one command)
+ros2 launch src/rov_direct_control/launch/px4_control.launch.py
 ```
 
-### 5.2 Manual motor test / 手动电机测试
+### Manual startup / 手动分步启动
+
+#### Gazebo backend
 
 ```bash
-ros2 run rov_direct_control test_motors.py
-```
-
-Interactive commands / 交互命令：
-- `arm`, `disarm`
-- `status`
-- `stop`
-- `<id> <value>` (`id: 0..7`, `value: -1.0..1.0` or `nan`)
-- `z <value>` (batch set channels `0..3`)
-- `q`
-
-### 5.3 Simulation perception+EKF / 仿真感知与 EKF 启动
-
-```bash
+# Step 1: Start simulation perception + EKF
 bash src/rov_direct_control/sim/start_perception_brain.sh
+
+# Step 2: Start controller
+python3 src/rov_direct_control/main.py --ros-args -p actuator_backend:=gazebo
 ```
 
-## 6. Quick Troubleshooting / 快速排查
+#### PX4 backend
 
-### A. No publisher on `/fmu/in/actuator_motors`
-### A. `/fmu/in/actuator_motors` 发布者为 0
+Requirements: Micro XRCE Agent running, PX4 running, DVL connected.
+
+```bash
+# Step 1: Start bridges
+python3 src/rov_direct_control/imu_bridge.py &
+python3 src/rov_direct_control/dvl_bridge.py &
+python3 src/rov_direct_control/depth_bridge.py &
+
+# Step 2: Start EKF
+ros2 run robot_localization ekf_node --ros-args --params-file src/rov_direct_control/config/ekf_real.yaml &
+
+# Step 3: Start controller
+python3 src/rov_direct_control/main.py --ros-args -p actuator_backend:=px4
+```
+
+### Publish target at runtime / 运行中发布目标
+
+```bash
+# Single target: x=1.0 y=0.0 depth=5.0 yaw=0.0
+python3 src/rov_direct_control/tools/publish_target_pose.py 1.0 0.0 5.0 0.0
+```
+
+### Manual motor test / 手动电机测试
+
+```bash
+ros2 run rov_direct_control manual_control.py
+```
+
+## Quick Troubleshooting / 快速排查
+
+### No publisher on `/fmu/in/actuator_motors`
 
 ```bash
 ros2 node list
 ros2 topic info /fmu/in/actuator_motors
 ```
 
-Check if `main.py`/`test_motors.py` is alive and not crashing.
+Check if `main.py` is alive and not crashing.
 
-检查 `main.py`/`test_motors.py` 是否正常运行且未崩溃。
-
-### B. Micro XRCE bind error (`errno 98`)
-### B. Micro XRCE 端口冲突（`errno 98`）
+### Micro XRCE bind error (`errno 98`)
 
 ```bash
 ss -lunp | grep 8888
-lsof -iUDP:8888
 ```
 
-Stop duplicate agent process; keep only one on UDP `8888`.
+Stop duplicate agent process.
 
-
-停止重复 Agent 进程，确保 UDP `8888` 仅有一个实例。
-
-### C. EKF not updating
-### C. EKF 不更新
+### EKF not updating
 
 ```bash
 ros2 topic hz /odometry/filtered
@@ -244,25 +240,9 @@ ros2 topic echo /sensor/dvl --once
 ros2 topic echo /sensor/depth --once
 ```
 
-Ensure timestamps are moving and frames/config match.
-
-确认时间戳持续递增，且坐标系与 EKF 配置一致。
-
-### D. Armed but no thrust response
-### D. 已解锁但无推力响应
+### Armed but no thrust response
 
 ```bash
 ros2 topic echo /fmu/in/offboard_control_mode --once
-ros2 topic echo /fmu/in/vehicle_command --once
 ros2 topic echo /fmu/in/actuator_motors --once
 ```
-
-## 7. Design Intent / 设计意图
-
-- `state_estimator.py` is an abstraction boundary; sensor backend can change without touching control logic.
-- `allocator.py` is stateless and easy to recalibrate.
-- `sim/` is fully dedicated to simulation and validation tooling.
-
-- `state_estimator.py` 是抽象边界；传感器后端可替换且不影响控制逻辑。
-- `allocator.py` 无状态，便于独立标定。
-- `sim/` 完整承载仿真与验证工具链。

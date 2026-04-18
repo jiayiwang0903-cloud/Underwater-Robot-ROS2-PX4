@@ -1,16 +1,22 @@
-"""Gazebo Transport 推力发送层 — 隔离仿真依赖。
+"""Gazebo actuator backend — 通过 Gazebo Transport 发送 8 路推力。
 
-将来换成真机 PWM 输出时，只需替换本文件。
+实现 ActuatorBackend 统一接口，可由 backend_factory 创建。
+仅用于仿真环境，不依赖 ROS 2 Node。
+
+Output / 输出 (Gazebo Transport):
+  /model/{model_name}/joint/rotor_{i}_joint/cmd_thrust  (gz.msgs.Double)  — 8 路推力 (N)
 """
 
 import numpy as np
 from gz.transport13 import Node as GzNode
 from gz.msgs10.double_pb2 import Double as GzDouble
 
+from actuator_backend import ActuatorBackend
+
 NUM_THRUSTERS = 8
 
 
-class GzThrusterInterface:
+class GzThrusterInterface(ActuatorBackend):
     def __init__(self, model_name: str = 'ustrov_0'):
         self._node = GzNode()
         self._pubs = []
