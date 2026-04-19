@@ -1,6 +1,40 @@
-# rov_direct_control
+# rov_direct_control (DEPRECATED)
 
-**This repository is an external ROS 2 low-level control stack for ROV, not a PX4 replacement.**
+> **This directory is deprecated.** Code has been restructured into separate ROS 2 packages under `src/`. See below for the new package structure.
+
+> **该目录已废弃。** 代码已重构为独立的 ROS 2 包，位于 `src/` 下。参见下方新包结构。
+
+## New Package Structure / 新包结构
+
+| Package | Role |
+|---------|------|
+| `ustrov_control` | Control core: PID, allocator, state estimator, actuator backend ABC / 控制核心 |
+| `ustrov_sensor_bridge` | Sensor bridges: IMU, DVL, depth to EKF / 传感器桥接 |
+| `ustrov_px4` | PX4 interface: actuator backend, mode interface, manual control / PX4 接口 |
+| `ustrov_sim` | Simulation: Gazebo backend, sim sensors, error analysis / 仿真 |
+| `ustrov_bringup` | Integration: launch files, configs, entry points / 集成启动 |
+
+## Quick Start
+
+```bash
+# Build all packages
+cd ~/catkin_ws && colcon build
+
+# Gazebo simulation
+ros2 launch ustrov_bringup sim_control.launch.py
+
+# PX4 real hardware
+ros2 launch ustrov_bringup px4_control.launch.py
+
+# Publish target at runtime
+ros2 run ustrov_bringup publish_target_pose -- 1.0 0.0 5.0 0.0
+```
+
+---
+
+**Below is the original documentation, kept for reference.**
+
+---
 
 USTROV external low-level control stack. It reads fused state, computes control outputs, allocates thruster forces, and sends them to a pluggable actuator backend (Gazebo or PX4).
 

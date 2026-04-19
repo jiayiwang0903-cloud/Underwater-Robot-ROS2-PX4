@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>ustrov_bringup</name>
+  <version>0.1.0</version>
+  <description>Integration bringup: launch files, EKF configs, entry points for sim/px4 modes.</description>
+  <maintainer email="ustrov@todo.com">ustrov</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <depend>rclpy</depend>
+  <depend>geometry_msgs</depend>
+  <depend>ustrov_control</depend>
+  <depend>ustrov_sensor_bridge</depend>
+  <depend>ustrov_px4</depend>
+  <depend>ustrov_sim</depend>
+  <exec_depend>robot_localization</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

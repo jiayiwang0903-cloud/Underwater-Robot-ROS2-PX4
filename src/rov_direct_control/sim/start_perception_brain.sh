@@ -1,4 +1,6 @@
 #!/bin/bash
+# DEPRECATED: Use 'ros2 launch ustrov_bringup sim_control.launch.py' instead.
+# 已废弃：请使用 'ros2 launch ustrov_bringup sim_control.launch.py'。
 
 set -eo pipefail
 
