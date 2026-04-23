@@ -29,7 +29,7 @@ class PX4ActuatorInterface(ActuatorBackend):
         self._pub_motors = self._node.create_publisher(
             ActuatorMotors, '/fmu/in/actuator_motors', qos_profile) #发布推力
         self.max_thrust_newtons = 100.0 #最大推力，用于归一化控制输入
-        self.channel_signs = np.array([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]) #每个通道的符号，允许反向推力
+        self.channel_signs = np.array([1.0, 1.0, 1.0, 1.0, -1.0, 1.0, 1.0, -1.0]) #每个通道的符号，允许反向推力
 
 
     def send(self, thrusts_newtons: np.ndarray):

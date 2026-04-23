@@ -26,8 +26,8 @@ class DepthBridge(Node):
 
         self.declare_parameter('pressure_topic', '/fmu/out/sensor_baro') #默认订阅 PX4 的气压计数据
         self.declare_parameter('depth_topic', '/sensor/depth') #发布深度数据，供 EKF 使用
-        self.declare_parameter('water_density', 1025.0)  # kg/m^3 密度
-        self.declare_parameter('gravity', 9.80665)  # m/s^2
+        self.declare_parameter('water_density', 1000    .0)  # kg/m^3 密度
+        self.declare_parameter('gravity', 1)  # m/s^2
         self.declare_parameter('surface_pressure_pa', -1.0)  #如果提供了正值，则直接使用该值作为水面压力基准，否则自动从前 N 个样本平均计算 P0
         self.declare_parameter('calibration_samples', 80) #样本数量，前80个样本平均作为水面压力基准
         self.declare_parameter('depth_covariance_z', 0.05)  #深度测量的协方差，供 EKF 使用

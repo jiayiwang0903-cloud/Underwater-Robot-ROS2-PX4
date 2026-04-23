@@ -13,6 +13,8 @@
   <depend>sensor_msgs</depend>
   <depend>ustrov_control</depend>
 
+  <exec_depend>joy</exec_depend>
+
   <export>
     <build_type>ament_python</build_type>
   </export>

@@ -39,6 +39,18 @@ class USTROVDirectController(Node):
         """
         super().__init__('ustrov_direct_controller')
 
+        self.declare_parameter('hold_zero_until_target', False)
+        self.declare_parameter('arm_on_target_only', False)
+        self.declare_parameter('auto_arm', True)
+        self.declare_parameter('enable_xy_control', True)
+
+        self.hold_zero_until_target = self.get_parameter(
+            'hold_zero_until_target').get_parameter_value().bool_value
+        self.arm_on_target_only = self.get_parameter(
+            'arm_on_target_only').get_parameter_value().bool_value
+        self.auto_arm = self.get_parameter(
+            'auto_arm').get_parameter_value().bool_value
+
         # 目标位姿 (NED: X前 Y右 Z下)
         # 环境变量仅作为启动默认目标，运行中通过 /ustrov/target_pose 更新。
         # topic 目标始终为 absolute（直接覆盖），不参与 relative 偏移逻辑。
@@ -59,7 +71,8 @@ class USTROVDirectController(Node):
             PoseStamped, '/ustrov/target_pose', self._target_pose_cb, 10)
 
         # 控制律（纯计算，不依赖 ROS）
-        self.control_law = ControlLaw()
+        enable_xy = self.get_parameter('enable_xy_control').get_parameter_value().bool_value
+        self.control_law = ControlLaw(enable_xy=enable_xy)
 
         # 状态估计
         self.estimator = EKFEstimator(self)
@@ -119,7 +132,7 @@ class USTROVDirectController(Node):
                 self.thrusters.send(np.zeros(8))
             return
 
-        # ============ state.ready == True ============
+        # state.ready == True
 
         if not self.control_started:
             self.control_started = True
@@ -138,16 +151,27 @@ class USTROVDirectController(Node):
             self.get_logger().info(
                 f'状态估计就绪: x={state.x:.2f} y={state.y:.2f} z={state.z:.2f}m，'
                 f'控制启动！模式={self.target_mode}, 目标Z={self.target.z:.2f}')
+            
+        if self.hold_zero_until_target and self.target_source != 'topic':
+            if self.mode_interface is not None:
+                self.thrusters.send(np.zeros(8))
+            return
 
         # 4. PX4 模式状态机：无阻塞的解锁流程
-        if self.mode_interface is not None and not self.offboard_armed:
+        allow_auto_arm = self.auto_arm
+        if self.arm_on_target_only and self.target_source != 'topic':
+            allow_auto_arm = False
+
+        if self.mode_interface is not None and not self.offboard_armed and allow_auto_arm:
             if self.tick == 50:
                 self.mode_interface.set_offboard_mode()
-                self.get_logger().info("请求切换至 Offboard 模式...")
+                self.get_logger().info("请求切换至 Offboard 模式")
             elif self.tick == 55:
                 self.mode_interface.arm()
                 self.offboard_armed = True
-                self.get_logger().info("请求解锁！")
+                self.get_logger().info("请求解锁")
+
+
 
         # 5. 控制律 → 分配 → 执行
         tau = self.control_law.compute(state, self.target, self.dt)
@@ -175,18 +199,44 @@ def spin_controller(backend_factory, args=None):
         backend_factory: callable(node) -> (actuator_backend, mode_interface, backend_name)
         args: ROS 2 命令行参数
     """
+    import signal
+    import time
+
     rclpy.init(args=args)
     node = USTROVDirectController(backend_factory)
+
+    _shutdown_done = False
+
+    def _safe_shutdown():
+        nonlocal _shutdown_done
+        if _shutdown_done:
+            return
+        _shutdown_done = True
+        try:
+            node.thrusters.stop()
+            if node.mode_interface is not None:
+                node.mode_interface._send_command(400, 0.0, 21196.0)  # disarm
+            time.sleep(0.2)
+        except Exception:
+            pass
+
+    # 在 rclpy 信号处理之前拦截 SIGINT，确保 stop/disarm 在 context 有效时发出
+    original_sigint = signal.getsignal(signal.SIGINT)
+
+    def _sigint_handler(sig, frame):
+        _safe_shutdown()
+        if callable(original_sigint):
+            original_sigint(sig, frame)
+        else:
+            raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, _sigint_handler)
+
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
-        node.get_logger().info("中断: 关闭控制器...")
+        _safe_shutdown()
     finally:
-        node.thrusters.stop()
-        if node.mode_interface is not None:
-            node.mode_interface._send_command(400, 0.0, 21196.0)  # disarm
-        import time
-        time.sleep(0.2)
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

@@ -37,10 +37,12 @@ class ControlLaw:
     """
 
     def __init__(self,
-                 kp_xy: float = 20.0, ki_xy: float = 2.0, kd_xy: float = 10.0, limit_xy: float = 100.0,
-                 kp_z: float = 20.0, ki_z: float = 5.0, kd_z: float = 20.0, limit_z: float = 100.0,
-                 kp_yaw: float = 5.0, ki_yaw: float = 0.5, kd_yaw: float = 2.0, limit_yaw: float = 50.0):
+                 kp_xy: float = 60.0, ki_xy: float = 2.0, kd_xy: float = 10.0, limit_xy: float = 280.0,
+                 kp_z: float = 400.0, ki_z: float = 50.0, kd_z: float = 200.0, limit_z: float = 400.0,
+                 kp_yaw: float = 5.0, ki_yaw: float = 0.5, kd_yaw: float = 2.0, limit_yaw: float = 14.0,
+                 enable_xy: bool = True):
 
+        self.enable_xy = enable_xy
         self.pid_x = PIDController(kp=kp_xy, ki=ki_xy, kd=kd_xy, limit=limit_xy)
         self.pid_y = PIDController(kp=kp_xy, ki=ki_xy, kd=kd_xy, limit=limit_xy)
         self.pid_z = PIDController(kp=kp_z, ki=ki_z, kd=kd_z, limit=limit_z)
@@ -61,19 +63,19 @@ class ControlLaw:
         Returns:
             tau: shape (6,) 的力/力矩向量 [Fx, Fy, Fz, Mx, My, Mz]
         """
-        # NED 世界系位置误差
-        err_x_world = target.x - state.x
-        err_y_world = target.y - state.y
-
-        # 世界系→机体系 (FRD) 旋转
-        cos_yaw = math.cos(state.yaw)
-        sin_yaw = math.sin(state.yaw)
-        err_x_body = cos_yaw * err_x_world + sin_yaw * err_y_world
-        err_y_body = -sin_yaw * err_x_world + cos_yaw * err_y_world
-
-        # 4-DOF PID
-        tau_x = self.pid_x.update(err_x_body, dt)
-        tau_y = self.pid_y.update(err_y_body, dt)
+        # X/Y 控制
+        if self.enable_xy:
+            err_x_world = target.x - state.x
+            err_y_world = target.y - state.y
+            cos_yaw = math.cos(state.yaw)
+            sin_yaw = math.sin(state.yaw)
+            err_x_body = cos_yaw * err_x_world + sin_yaw * err_y_world
+            err_y_body = -sin_yaw * err_x_world + cos_yaw * err_y_world
+            tau_x = self.pid_x.update(err_x_body, dt)
+            tau_y = self.pid_y.update(err_y_body, dt)
+        else:
+            tau_x = 0.0
+            tau_y = 0.0
         tau_z = self.pid_z.update(target.z - state.z, dt)
 
         err_yaw = (target.yaw - state.yaw + math.pi) % (2 * math.pi) - math.pi

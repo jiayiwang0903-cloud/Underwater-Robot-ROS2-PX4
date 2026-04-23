@@ -1,76 +1,52 @@
 #!/usr/bin/env python3
-"""PX4 实机模式最小 bringup。
+# -*- coding: utf-8 -*-
 
-启动链路:
-  imu_bridge + dvl_bridge + depth_bridge  ->  EKF  ->  px4_main (px4 backend controller)
+"""
+实机直接控制 launch（使用环境变量默认目标，立即启动控制）
 
-前置条件:
-  - Micro XRCE-DDS Agent 已运行
-  - PX4 飞控已启动
-  - DVL A50 传感器已连接
+定位：与 closed_loop_control.launch.py 同级
+- 不启动 bridges / EKF / monitor（由 hw_bringup 负责）
+- 只启动 px4_main 闭环控制器
+- 区别于 closed_loop_control：不等待 topic 目标，使用启动默认目标直接进入控制
 
-用法:
-  ros2 launch ustrov_bringup px4_control.launch.py
+使用流程：
+  终端 1: ros2 launch ustrov_bringup hw_bringup.launch.py
+  终端 2: ros2 launch ustrov_bringup px4_control.launch.py
 """
 
-import os
-
 from launch import LaunchDescription
-from launch.actions import TimerAction
+from launch.actions import DeclareLaunchArgument, TimerAction
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-
-from ament_index_python.packages import get_package_share_directory
 
 
 def generate_launch_description():
-    bringup_share = get_package_share_directory('ustrov_bringup')
-    ekf_config = os.path.join(bringup_share, 'config', 'ekf_real.yaml')
 
-    imu_bridge = Node(
-        package='ustrov_sensor_bridge',
-        executable='imu_bridge',
-        name='imu_bridge',
-        output='screen',
-    )
-
-    dvl_bridge = Node(
-        package='ustrov_sensor_bridge',
-        executable='dvl_bridge',
-        name='dvl_bridge',
-        output='screen',
-    )
-
-    depth_bridge = Node(
-        package='ustrov_sensor_bridge',
-        executable='depth_bridge',
-        name='depth_bridge',
-        output='screen',
-    )
-
-    ekf = Node(
-        package='robot_localization',
-        executable='ekf_node',
-        name='ekf_filter_node',
-        output='screen',
-        parameters=[ekf_config],
+    enable_xy_arg = DeclareLaunchArgument(
+        'enable_xy_control',
+        default_value='false',
+        description='是否启用 X/Y 水平位置跟踪'
     )
 
     controller = TimerAction(
-        period=3.0,
+        period=2.0,
         actions=[
             Node(
                 package='ustrov_bringup',
                 executable='px4_main',
                 name='ustrov_controller',
                 output='screen',
-            ),
-        ],
+                parameters=[{
+                    'hold_zero_until_target': False,
+                    'arm_on_target_only': False,
+                    'auto_arm': True,
+                    'enable_xy_control': LaunchConfiguration('enable_xy_control'),
+                }],
+            )
+        ]
     )
 
     return LaunchDescription([
-        imu_bridge,
-        dvl_bridge,
-        depth_bridge,
-        ekf,
+        enable_xy_arg,
         controller,
     ])
