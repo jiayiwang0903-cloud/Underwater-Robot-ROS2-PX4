@@ -1,8 +1,8 @@
-"""状态估计模块 — 隔离传感器来源，对外提供统一位姿。
+"""状态源层（state source layer）— 统一状态读取接口。
 
-实机模式: EKFEstimator      — 融合 DVL/深度计/IMU/USBL (TODO)
-
-controller_node.py 只调用 estimator.get_state()，不关心数据从哪来。
+对外提供 RovState，隔离传感器来源。
+controller_node 只调用 estimator.get_state()，不关心数据从哪来。
+当前实现：EKFEstimator 订阅 /odometry/filtered（仿真与实机通用）。
 """
 
 import math

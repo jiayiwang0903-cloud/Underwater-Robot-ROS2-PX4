@@ -10,13 +10,13 @@ import numpy as np
 import rclpy
 from rclpy.node import Node
 
-from px4_interface import PX4Interface
-from px4_actuator import PX4ActuatorInterface
+from ustrov_px4.px4_interface import PX4Interface
+from ustrov_px4.px4_actuator import PX4ActuatorInterface
 
 from px4_msgs.msg import VehicleStatus
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 from sensor_msgs.msg import Joy
-from allocator import allocate
+from ustrov_control.allocator import allocate
 
 class ManualControlNode(Node):
     def __init__(self):
