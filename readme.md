@@ -103,7 +103,7 @@ python3 ~/ws_ustrov/src/rov_direct_control/main.py
 ```
 
 🛠️ 4. 故障排除 (Troubleshooting)
-在日常开发与联调中，如果遇到奇怪的报错，请优先查阅以下解决方案：
+在日常开发与联调中，如果遇到奇怪的报错，请优先查阅以下解决方案：conflicts
 
 4.1 串口连接被拒绝 / ttyUSB0 不存在
 现象：运行 DDS Agent 时提示 Permission denied 或串口被占用。
@@ -129,7 +129,7 @@ killall -9 px4 gz ruby
 
 4.3 仿真模型修改未生效
 解决：清除 PX4 的缓存配置并重新编译：
-
+conflicts
 ```bash
 cd ~/PX4-Autopilot
 rm -rf build/px4_sitl_default/
